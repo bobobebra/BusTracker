@@ -1,9 +1,8 @@
-import fetch from "node-fetch";
-import { transit_realtime } from "gtfs-realtime-bindings";
+import GtfsRealtimeBindings from "gtfs-realtime-bindings";
 import AdmZip from "adm-zip";
 import Papa from "papaparse";
 
-let tripToRoute = null;   // cached map: tripId -> route_id
+let tripToRoute = null;
 let lastLoad = 0;
 
 async function ensureTripToRoute(apiKey) {
@@ -14,6 +13,7 @@ async function ensureTripToRoute(apiKey) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`GTFS static fetch failed: ${r.status}`);
   const buf = Buffer.from(await r.arrayBuffer());
+
   const zip = new AdmZip(buf);
   const tripsTxt = zip.getEntry("trips.txt").getData().toString("utf8");
   const trips = Papa.parse(tripsTxt, { header: true, skipEmptyLines: true }).data;
@@ -28,7 +28,7 @@ async function ensureTripToRoute(apiKey) {
 
 export default async function handler(req, res) {
   try {
-    const apiKey = process.env.TRAFIKLAB_API_KEY || "c498298c7eb7434ea59c5fc4149bc7f5";
+    const apiKey = process.env.TRAFIKLAB_API_KEY;
     await ensureTripToRoute(apiKey);
 
     const feedUrl = `https://opendata.samtrafiken.se/gtfs-rt/dintur/VehiclePositions.pb?key=${apiKey}`;
@@ -36,22 +36,23 @@ export default async function handler(req, res) {
     if (!rr.ok) throw new Error(`Trafiklab request failed: ${rr.status}`);
 
     const buf = new Uint8Array(await rr.arrayBuffer());
-    const feed = transit_realtime.FeedMessage.decode(buf);
+    const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buf);
 
     const vehicles = feed.entity
-      .filter(e => e.vehicle?.position)
-      .map(e => {
+      .filter((e) => e.vehicle?.position)
+      .map((e) => {
         const v = e.vehicle;
         const tripId = v.trip?.tripId ? String(v.trip.tripId) : null;
         const rtFromRealtime = v.trip?.routeId ? String(v.trip.routeId) : null;
-        const routeResolved = rtFromRealtime || (tripId ? tripToRoute.get(tripId) : null) || "unknown";
+        const routeResolved =
+          rtFromRealtime || (tripId ? tripToRoute.get(tripId) : null) || "unknown";
 
         return {
           id: e.id,
           lat: v.position.latitude,
           lon: v.position.longitude,
-          bearing: v.position.bearing ?? 0,     // rotate icon
-          speed: v.position.speed ?? null,      // m/s (if provided)
+          bearing: v.position.bearing ?? 0,
+          speed: v.position.speed ?? null,
           route: routeResolved,
           tripId,
           label: v.vehicle?.label ?? v.vehicle?.id ?? null,
