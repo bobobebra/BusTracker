@@ -21,7 +21,7 @@ export default async function handler(req, res) {
       return res.status(200).json(cache.data);
     }
 
-    // try Sweden 3 first, then Regional
+    // Try Sweden-3, then Regional
     let r = await fetch(SWEDEN3_ZIP);
     if (!r.ok) {
       if (debug) console.warn("Sweden3 static failed, trying Regional:", r.status);
@@ -37,6 +37,7 @@ export default async function handler(req, res) {
     const trips  = parseCSV(read("trips.txt"));
     const shapes = parseCSV(read("shapes.txt"));
 
+    // shape_id -> ordered points
     const shapePts = new Map();
     for (const row of shapes) {
       const sid = row.shape_id;
@@ -49,6 +50,7 @@ export default async function handler(req, res) {
     }
     for (const arr of shapePts.values()) arr.sort((a,b)=>a.seq-b.seq);
 
+    // route_id -> set(shape_id)
     const routeShapes = new Map();
     for (const t of trips) {
       if (!t.route_id || !t.shape_id) continue;
@@ -56,6 +58,7 @@ export default async function handler(req, res) {
       routeShapes.get(t.route_id).add(t.shape_id);
     }
 
+    // GeoJSON per route
     const features = [];
     for (const rt of routes) {
       const sids = routeShapes.get(rt.route_id);
@@ -97,7 +100,7 @@ export default async function handler(req, res) {
   } catch (err) {
     const msg = `Failed to build shapes: ${err?.message || err}`;
     if (debug) console.error("Shapes API error:", msg);
-    // return empty shapes so the app still loads
+    // return empty shapes so UI still loads
     res.status(200).json({ routes: [], shapes: { type: "FeatureCollection", features: [] }, warning: msg });
   }
 }
