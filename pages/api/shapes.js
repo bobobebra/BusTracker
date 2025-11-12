@@ -1,6 +1,9 @@
 import AdmZip from "adm-zip";
 import Papa from "papaparse";
 
+// 🔒 Hardcoded Trafiklab key (server-side only)
+const TRAFIKLAB_KEY = "c498298c7eb7434ea59c5fc4149bc7f5";
+
 let cache = { at: 0, data: null };
 const TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -10,16 +13,12 @@ const hex = (s) => (s && s.trim() ? (s.startsWith("#") ? s : `#${s}`) : "#3388ff
 export default async function handler(req, res) {
   const debug = req.query.debug === "1";
   try {
-    const apiKey = req.query.key || process.env.TRAFIKLAB_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY (or pass ?key=... for debug)" });
-
     if (cache.data && Date.now() - cache.at < TTL_MS) {
       res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
       return res.status(200).json(cache.data);
     }
 
-    // ✅ Use GTFS Sweden 3 static instead of GTFS Regional
-    const zipUrl = `https://opendata.samtrafiken.se/gtfs-sweden/sweden.zip?key=${encodeURIComponent(apiKey)}`;
+    const zipUrl = `https://opendata.samtrafiken.se/gtfs-sweden/sweden.zip?key=${encodeURIComponent(TRAFIKLAB_KEY)}`;
     const r = await fetch(zipUrl);
     if (!r.ok) {
       const msg = `GTFS static fetch failed: ${r.status} ${r.statusText}`;
@@ -59,10 +58,10 @@ export default async function handler(req, res) {
     // GeoJSON features per route
     const features = [];
     for (const rt of routes) {
-      const shapeSet = routeShapes.get(rt.route_id);
-      if (!shapeSet) continue;
+      const sids = routeShapes.get(rt.route_id);
+      if (!sids || sids.size === 0) continue;
       const lines = [];
-      for (const sid of shapeSet) {
+      for (const sid of sids) {
         const pts = shapePoints.get(sid);
         if (!pts || pts.length < 2) continue;
         lines.push(pts.map((p) => [p.lon, p.lat]));
