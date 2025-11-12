@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import Papa from "papaparse";
 
 // 🔒 Hardcoded Trafiklab key (server-side only)
-const TRAFIKLAB_KEY = "c498298c7eb7434ea59c5fc4149bc7f5";
+const TRAFIKLAB_KEY = "5669c38dfd454535a3e6d59c71ccab61";
 
 let cache = { at: 0, data: null };
 const TTL_MS = 12 * 60 * 60 * 1000;
