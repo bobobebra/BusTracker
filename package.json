@@ -3,12 +3,8 @@
   "version": "0.5.1",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
   "engines": { "node": "20.x" },
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
   "dependencies": {
     "adm-zip": "0.5.10",
     "gtfs-rt-bindings": "^4.9.0",
@@ -17,6 +13,9 @@
     "papaparse": "5.4.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-leaflet": "4.2.1"
+  },
+  "overrides": {
     "react-leaflet": "4.2.1"
   }
 }
