@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-const MapGoogle = dynamic(() => import("../components/MapGoogle"), { ssr: false });
 
-// 🔓 client-side key (lock with HTTP referrer restrictions in Google Cloud)
-const GOOGLE_KEY = "AIzaSyDFKrkWw6zRBVP2DAHJfSG4sV8Bu8IagDQ";
+const MapOSM = dynamic(() => import("../components/MapOSM"), { ssr: false });
 
 export default function Home() {
   const [vehicles, setVehicles] = useState([]);
@@ -13,7 +11,7 @@ export default function Home() {
   const [selectedBus, setSelectedBus] = useState(null);
   const [routeQuery, setRouteQuery] = useState("");
 
-  // vehicles every 5s
+  // vehicles every 10s (keeps below Trafiklab burst limits)
   useEffect(() => {
     let cancel = false;
     async function loadVehicles() {
@@ -27,11 +25,11 @@ export default function Home() {
       }
     }
     loadVehicles();
-    const id = setInterval(loadVehicles, 5000);
+    const id = setInterval(loadVehicles, 10000);
     return () => { cancel = true; clearInterval(id); };
   }, []);
 
-  // shapes (routes + polylines) once
+  // shapes (routes + lines) once
   useEffect(() => {
     (async () => {
       try {
@@ -63,7 +61,7 @@ export default function Home() {
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* sidebar */}
+      {/* Sidebar */}
       <aside style={{ width: 300, background: "#0f1115", color: "#fff", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: 10, borderBottom: "1px solid #222", position: "sticky", top: 0, background: "#0f1115", zIndex: 1 }}>
           <input
@@ -125,15 +123,13 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* map */}
+      {/* Map */}
       <div style={{ flex: 1 }}>
-        <MapGoogle
-          apiKey={GOOGLE_KEY}
+        <MapOSM
           vehicles={visibleVehicles}
           shapes={shapes}
           selectedRouteId={selectedRouteId}
           selectedBus={selectedBus}
-          showRoutes={true}
         />
       </div>
     </div>
