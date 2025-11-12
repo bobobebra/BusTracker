@@ -4,7 +4,7 @@ import * as Rt from "gtfs-rt-bindings"; // transit_realtime
 
 // 🔒 Your Trafiklab key is hardcoded here (server-side only)
 // NOTE: If this repo is public, rotate the key afterwards.
-const TRAFIKLAB_KEY = "c498298c7eb7434ea59c5fc4149bc7f5";
+const TRAFIKLAB_KEY = "5669c38dfd454535a3e6d59c71ccab61";
 
 let tripToRoute = null;
 let lastLoad = 0;
