@@ -3,8 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const SUNDSVALL = { lat: 62.391, lng: 17.306 };
 
+// Vector symbol (supports rotation)
 const makeSymbol = (color = "#2dd4bf", rotation = 0) => ({
-  path: "M 0,-1 2,0 0,1 -2,0 Z", // simple diamond/arrow; rotates by bearing
+  path: "M 0,-1 2,0 0,1 -2,0 Z", // arrow/diamond
   fillColor: color,
   fillOpacity: 1,
   strokeWeight: 0,
@@ -22,8 +23,9 @@ export default function MapGoogle({
 }) {
   const { isLoaded } = useJsApiLoader({ googleMapsApiKey: apiKey });
   const mapRef = useRef(null);
-  const [mapTypeId, setMapTypeId] = useState("ROADMAP"); // or "HYBRID"
+  const [mapTypeId, setMapTypeId] = useState("ROADMAP"); // HYBRID for satellite
 
+  // Build polylines from GeoJSON
   const polylines = useMemo(() => {
     if (!shapes || !showRoutes) return [];
     const out = [];
@@ -39,6 +41,7 @@ export default function MapGoogle({
     return out;
   }, [shapes, showRoutes, selectedRouteId]);
 
+  // Fit to selected route
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selectedRouteId || !shapes) return;
@@ -54,6 +57,7 @@ export default function MapGoogle({
     if (!bounds.isEmpty()) map.fitBounds(bounds, 30);
   }, [selectedRouteId, shapes]);
 
+  // Zoom to selected bus
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selectedBus) return;
@@ -110,12 +114,13 @@ export default function MapGoogle({
             />
           ))}
 
-          {/* Rotating bus markers */}
+          {/* Rotating bus markers (bearing) */}
           {vehicles.map((v) => (
             <Marker
               key={v.id}
               position={{ lat: v.lat, lng: v.lon }}
               icon={makeSymbol("#2dd4bf", Math.round(v.bearing || 0))}
+              // For per-route colors, pass a route->color map and set fillColor here.
             />
           ))}
         </GoogleMap>
