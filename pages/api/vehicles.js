@@ -1,8 +1,8 @@
 import AdmZip from "adm-zip";
 import Papa from "papaparse";
-import * as Rt from "gtfs-rt-bindings"; // exposes FeedMessage at top-level
+import * as Rt from "gtfs-rt-bindings";
 
-// 🔑 Trafiklab key you gave me (rotate later if this repo is public)
+// 🔑 Trafiklab key (server-side only). Rotate if the repo is public.
 const TL_KEY = "5669c38dfd454535a3e6d59c71ccab61";
 const OP = "dintur";
 
@@ -18,11 +18,16 @@ const URLS = {
 let tripToRoute = null;
 let lastTripLoad = 0;
 
+// tiny server-side cache for vehicles (anti-429)
+let vehiclesCache = null;
+let vehiclesCacheAt = 0;
+const VEHICLE_TTL_MS = 7000;
+
 async function fetchBuf(url, mustOk = true) {
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) {
     const body = await r.text().catch(() => "");
-    const msg = `${r.status} ${r.statusText}${body ? ` | ${body.slice(0,200)}` : ""}`;
+    const msg = `${r.status} ${r.statusText}${body ? ` | ${body.slice(0, 200)}` : ""}`;
     if (mustOk) throw new Error(msg);
     return { ok: false, msg };
   }
@@ -32,7 +37,7 @@ async function fetchBuf(url, mustOk = true) {
 async function buildTripMap(debug = false) {
   if (tripToRoute && Date.now() - lastTripLoad < 12 * 60 * 60 * 1000) return tripToRoute;
 
-  // try Sweden 3 first, then Regional
+  // try Sweden 3 static, then Regional static
   let got = await fetchBuf(URLS.sweden3Zip, false);
   if (!got.ok) {
     if (debug) console.warn("Sweden3 static failed, trying Regional:", got.msg);
@@ -63,13 +68,30 @@ async function getVehiclePositions(debug = false) {
 
 export default async function handler(req, res) {
   const debug = req.query.debug === "1";
+
+  // serve from cache if fresh (reduces upstream hits)
+  if (vehiclesCache && Date.now() - vehiclesCacheAt < VEHICLE_TTL_MS) {
+    res.setHeader("Cache-Control", "s-maxage=7, stale-while-revalidate=30");
+    return res.status(200).json(vehiclesCache);
+    }
+
   try {
-    // build trip->route map (if static not allowed, we still return buses with route="unknown" or routeId from RT)
     try { await buildTripMap(debug); } catch (e) { if (debug) console.warn("trip map build failed:", e.message); }
 
-    const bytes = await getVehiclePositions(debug);
+    let bytes;
+    try {
+      bytes = await getVehiclePositions(debug);
+    } catch (e) {
+      if (String(e.message).startsWith("429 ")) { // upstream rate limit
+        if (vehiclesCache) {
+          res.setHeader("Cache-Control", "s-maxage=7, stale-while-revalidate=30");
+          return res.status(200).json(vehiclesCache);
+        }
+      }
+      throw e;
+    }
 
-    // ✅ decoder fix: top-level FeedMessage
+    // decode GTFS-RT (top-level FeedMessage)
     let feed;
     try { feed = Rt.FeedMessage.decode(bytes); }
     catch (e) { return res.status(500).json({ error: `Decode error: ${e?.message || e}` }); }
@@ -95,7 +117,11 @@ export default async function handler(req, res) {
         };
       });
 
-    res.setHeader("Cache-Control", "no-store");
+    // update cache & respond
+    vehiclesCache = vehicles;
+    vehiclesCacheAt = Date.now();
+
+    res.setHeader("Cache-Control", "s-maxage=7, stale-while-revalidate=30");
     res.status(200).json(vehicles);
   } catch (err) {
     const msg = `Failed to fetch vehicle data: ${err?.message || err}`;
