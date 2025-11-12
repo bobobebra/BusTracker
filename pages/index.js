@@ -1,4 +1,3 @@
-// pages/index.js
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 
@@ -57,13 +56,13 @@ export default function Home() {
   }, [routes, routeQuery]);
 
   // Only show vehicles on selected route (if any)
-  const visibleVehicles = useMemo(() => {
-    return selectedRouteId
-      ? vehicles.filter((v) => String(v.route) === String(selectedRouteId))
-      : vehicles;
-  }, [vehicles, selectedRouteId]);
+  const visibleVehicles = useMemo(
+    () => (selectedRouteId ? vehicles.filter((v) => String(v.route) === String(selectedRouteId)) : vehicles),
+    [vehicles, selectedRouteId]
+  );
 
-  const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+  const GOOGLE_KEY =
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
