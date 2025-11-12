@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-
 const MapGoogle = dynamic(() => import("../components/MapGoogle"), { ssr: false });
+
+// 🌍 Hardcode your Google Maps JS key on the client.
+// NOTE: Client-side keys are visible; lock them with HTTP referrer restrictions.
+const GOOGLE_KEY = "AIzaSyDFKrkWw6zRBVP2DAHJfSG4sV8Bu8IagDQ";
 
 export default function Home() {
   const [vehicles, setVehicles] = useState([]);
@@ -44,7 +47,6 @@ export default function Home() {
     })();
   }, []);
 
-  // Proper route search (short_name / long_name / route_id)
   const filteredRoutes = useMemo(() => {
     const q = routeQuery.trim().toLowerCase();
     if (!q) return routes;
@@ -55,17 +57,13 @@ export default function Home() {
     );
   }, [routes, routeQuery]);
 
-  // Only show vehicles on selected route (if any)
   const visibleVehicles = useMemo(
     () => (selectedRouteId ? vehicles.filter((v) => String(v.route) === String(selectedRouteId)) : vehicles),
     [vehicles, selectedRouteId]
   );
 
-  const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
-
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* Sidebar */}
       <aside style={{ width: 300, background: "#0f1115", color: "#fff", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: 10, borderBottom: "1px solid #222", position: "sticky", top: 0, background: "#0f1115", zIndex: 1 }}>
           <input
@@ -127,7 +125,6 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* Map */}
       <div style={{ flex: 1 }}>
         <MapGoogle
           apiKey={GOOGLE_KEY}
