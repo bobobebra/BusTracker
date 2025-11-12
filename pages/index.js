@@ -16,10 +16,10 @@ export default function Home() {
     let cancel = false;
     async function loadVehicles() {
       try {
-        const res = await fetch("/api/vehicles");
+        console.log("🔄 fetching vehicles…");
+        const res = await fetch("/api/vehicles", { cache: "no-store" });
         const data = await res.json();
-        if (!cancel) setVehicles(data);
-        console.log(`✅ vehicles: ${data.length}`);
+        if (!cancel) setVehicles(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error("vehicles error", e);
       }
@@ -33,11 +33,11 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
+        console.log("🗺️ fetching shapes…");
         const r = await fetch("/api/shapes");
         const j = await r.json();
-        setRoutes(j.routes);
-        setShapes(j.shapes);
-        console.log(`🗺️ shapes features: ${j.shapes.features.length}`);
+        setRoutes(j.routes || []);
+        setShapes(j.shapes || null);
       } catch (e) {
         console.error("shapes error", e);
       }
@@ -61,8 +61,7 @@ export default function Home() {
     [vehicles, selectedRouteId]
   );
 
-  const GOOGLE_KEY =
-    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+  const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
