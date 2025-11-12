@@ -1,22 +1,29 @@
 import AdmZip from "adm-zip";
 import Papa from "papaparse";
-import { transit_realtime } from "gtfs-rt-bindings";
+// Use a robust namespace import for the decoder
+import * as Rt from "gtfs-rt-bindings"; // transit_realtime namespace
 
 let tripToRoute = null;
 let lastLoad = 0;
 
 // Build a cache: trip_id -> route_id from static GTFS (Din Tur)
-async function ensureTripToRoute(apiKey) {
+async function ensureTripToRoute(apiKey, debug = false) {
   const TTL = 12 * 60 * 60 * 1000; // 12h
   if (tripToRoute && Date.now() - lastLoad < TTL) return;
 
-  const url = `https://opendata.samtrafiken.se/gtfs/dintur/dintur.zip?key=${apiKey}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`GTFS static fetch failed: ${r.status}`);
-  const buf = Buffer.from(await r.arrayBuffer());
+  const staticUrl = `https://opendata.samtrafiken.se/gtfs/dintur/dintur.zip?key=${encodeURIComponent(apiKey)}`;
+  const r = await fetch(staticUrl, { cache: "no-store" });
+  if (!r.ok) {
+    const msg = `GTFS static fetch failed: ${r.status} ${r.statusText}`;
+    if (debug) console.error(msg);
+    throw new Error(msg);
+  }
 
+  const buf = Buffer.from(await r.arrayBuffer());
   const zip = new AdmZip(buf);
-  const tripsTxt = zip.getEntry("trips.txt").getData().toString("utf8");
+  const tripsEntry = zip.getEntry("trips.txt");
+  if (!tripsEntry) throw new Error("trips.txt missing in GTFS static ZIP");
+  const tripsTxt = tripsEntry.getData().toString("utf8");
   const trips = Papa.parse(tripsTxt, { header: true, skipEmptyLines: true }).data;
 
   const map = new Map();
@@ -28,21 +35,36 @@ async function ensureTripToRoute(apiKey) {
 }
 
 export default async function handler(req, res) {
+  const debug = req.query.debug === "1";
   try {
     const apiKey = process.env.TRAFIKLAB_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY" });
+    if (!apiKey) {
+      return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY" });
+    }
 
-    await ensureTripToRoute(apiKey);
+    await ensureTripToRoute(apiKey, debug);
 
-    // Din Tur realtime VehiclePositions feed
-    const feedUrl = `https://opendata.samtrafiken.se/gtfs-rt/dintur/VehiclePositions.pb?key=${apiKey}`;
+    const feedUrl = `https://opendata.samtrafiken.se/gtfs-rt/dintur/VehiclePositions.pb?key=${encodeURIComponent(apiKey)}`;
     const rr = await fetch(feedUrl, { cache: "no-store" });
-    if (!rr.ok) throw new Error(`Trafiklab VehiclePositions failed: ${rr.status}`);
+    if (!rr.ok) {
+      const text = await rr.text().catch(() => "");
+      const msg = `Trafiklab VehiclePositions failed: ${rr.status} ${rr.statusText}${text ? ` | body: ${text.slice(0,200)}` : ""}`;
+      if (debug) console.error(msg);
+      return res.status(500).json({ error: msg });
+    }
 
-    const buf = new Uint8Array(await rr.arrayBuffer());
-    const feed = transit_realtime.FeedMessage.decode(buf);
+    // Use Buffer explicitly for decoder compatibility
+    const bytes = Buffer.from(await rr.arrayBuffer());
+    let feed;
+    try {
+      feed = Rt.transit_realtime.FeedMessage.decode(bytes);
+    } catch (e) {
+      const msg = `Decode error: ${e?.message || e}`;
+      if (debug) console.error(msg);
+      return res.status(500).json({ error: msg });
+    }
 
-    const vehicles = feed.entity
+    const vehicles = (feed.entity || [])
       .filter((e) => e.vehicle?.position)
       .map((e) => {
         const v = e.vehicle;
@@ -64,9 +86,10 @@ export default async function handler(req, res) {
       });
 
     res.setHeader("Cache-Control", "no-store");
-    res.status(200).json(vehicles);
+    return res.status(200).json(vehicles);
   } catch (err) {
-    console.error("Vehicle API error:", err);
-    res.status(500).json({ error: "Failed to fetch vehicle data" });
+    const msg = `Failed to fetch vehicle data: ${err?.message || err}`;
+    if (debug) console.error("Vehicle API error:", err);
+    return res.status(500).json({ error: msg });
   }
 }
