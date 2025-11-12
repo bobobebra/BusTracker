@@ -4,36 +4,38 @@ import Papa from "papaparse";
 let cache = { at: 0, data: null };
 const TTL_MS = 12 * 60 * 60 * 1000;
 
-const parseCSV = (text) =>
-  Papa.parse(text, { header: true, skipEmptyLines: true }).data;
-
-const hex = (s) =>
-  s && s.trim() ? (s.startsWith("#") ? s : `#${s}`) : "#3388ff";
+const parseCSV = (text) => Papa.parse(text, { header: true, skipEmptyLines: true }).data;
+const hex = (s) => (s && s.trim() ? (s.startsWith("#") ? s : `#${s}`) : "#3388ff");
 
 export default async function handler(req, res) {
+  const debug = req.query.debug === "1";
   try {
+    const apiKey = req.query.key || process.env.TRAFIKLAB_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY (or pass ?key=... for debug)" });
+
     if (cache.data && Date.now() - cache.at < TTL_MS) {
       res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
       return res.status(200).json(cache.data);
     }
 
-    const apiKey = process.env.TRAFIKLAB_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY" });
-
-    const zipUrl = `https://opendata.samtrafiken.se/gtfs/dintur/dintur.zip?key=${apiKey}`;
+    // ✅ Use GTFS Sweden 3 static instead of GTFS Regional
+    const zipUrl = `https://opendata.samtrafiken.se/gtfs-sweden/sweden.zip?key=${encodeURIComponent(apiKey)}`;
     const r = await fetch(zipUrl);
-    if (!r.ok) throw new Error(`GTFS static fetch failed: ${r.status}`);
+    if (!r.ok) {
+      const msg = `GTFS static fetch failed: ${r.status} ${r.statusText}`;
+      if (debug) console.error(msg);
+      throw new Error(msg);
+    }
 
     const buf = Buffer.from(await r.arrayBuffer());
     const zip = new AdmZip(buf);
-
     const read = (name) => zip.getEntry(name)?.getData().toString("utf8");
 
     const routes = parseCSV(read("routes.txt"));
     const trips = parseCSV(read("trips.txt"));
     const shapes = parseCSV(read("shapes.txt"));
 
-    // shape_id -> ordered [lon,lat]
+    // shape_id -> ordered points
     const shapePoints = new Map();
     for (const row of shapes) {
       const sid = row.shape_id;
@@ -54,13 +56,13 @@ export default async function handler(req, res) {
       routeShapes.get(t.route_id).add(t.shape_id);
     }
 
-    // Build per-route GeoJSON MultiLineString
+    // GeoJSON features per route
     const features = [];
     for (const rt of routes) {
-      const sids = routeShapes.get(rt.route_id);
-      if (!sids || sids.size === 0) continue;
+      const shapeSet = routeShapes.get(rt.route_id);
+      if (!shapeSet) continue;
       const lines = [];
-      for (const sid of sids) {
+      for (const sid of shapeSet) {
         const pts = shapePoints.get(sid);
         if (!pts || pts.length < 2) continue;
         lines.push(pts.map((p) => [p.lon, p.lat]));
@@ -94,7 +96,8 @@ export default async function handler(req, res) {
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=3600");
     res.status(200).json(payload);
   } catch (err) {
-    console.error("Shapes API error:", err);
-    res.status(500).json({ error: "Failed to build shapes" });
+    const msg = `Failed to build shapes: ${err?.message || err}`;
+    if (debug) console.error("Shapes API error:", err);
+    res.status(500).json({ error: msg });
   }
 }
