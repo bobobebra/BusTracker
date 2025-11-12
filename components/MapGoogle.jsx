@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const SUNDSVALL = { lat: 62.391, lng: 17.306 };
 
-// Vector symbol (supports rotation)
+// simple arrow/diamond marker with rotation = bearing
 const makeSymbol = (color = "#2dd4bf", rotation = 0) => ({
-  path: "M 0,-1 2,0 0,1 -2,0 Z", // arrow/diamond
+  path: "M 0,-1 2,0 0,1 -2,0 Z",
   fillColor: color,
   fillOpacity: 1,
   strokeWeight: 0,
@@ -25,11 +25,10 @@ export default function MapGoogle({
   const mapRef = useRef(null);
   const [mapTypeId, setMapTypeId] = useState("ROADMAP"); // HYBRID for satellite
 
-  // Build polylines from GeoJSON
   const polylines = useMemo(() => {
     if (!shapes || !showRoutes) return [];
     const out = [];
-    for (const f of shapes.features) {
+    for (const f of shapes.features || []) {
       if (selectedRouteId && f.properties.route_id !== selectedRouteId) continue;
       const color = f.properties.color || "#3388ff";
       if (f.geometry.type === "MultiLineString") {
@@ -41,12 +40,11 @@ export default function MapGoogle({
     return out;
   }, [shapes, showRoutes, selectedRouteId]);
 
-  // Fit to selected route
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selectedRouteId || !shapes) return;
     const bounds = new window.google.maps.LatLngBounds();
-    for (const f of shapes.features) {
+    for (const f of shapes.features || []) {
       if (f.properties.route_id !== selectedRouteId) continue;
       if (f.geometry.type === "MultiLineString") {
         for (const line of f.geometry.coordinates) {
@@ -57,7 +55,6 @@ export default function MapGoogle({
     if (!bounds.isEmpty()) map.fitBounds(bounds, 30);
   }, [selectedRouteId, shapes]);
 
-  // Zoom to selected bus
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selectedBus) return;
@@ -67,7 +64,6 @@ export default function MapGoogle({
 
   return (
     <div style={{ height: "100%", width: "100%", position: "relative" }}>
-      {/* Basemap toggle */}
       <div style={{ position: "absolute", zIndex: 2, top: 10, right: 10, display: "flex", gap: 8 }}>
         {["ROADMAP", "HYBRID"].map((t) => (
           <button
@@ -101,7 +97,6 @@ export default function MapGoogle({
             gestureHandling: "greedy"
           }}
         >
-          {/* Route polylines */}
           {polylines.map((pl, i) => (
             <Polyline
               key={i}
@@ -114,13 +109,11 @@ export default function MapGoogle({
             />
           ))}
 
-          {/* Rotating bus markers (bearing) */}
           {vehicles.map((v) => (
             <Marker
               key={v.id}
               position={{ lat: v.lat, lng: v.lon }}
               icon={makeSymbol("#2dd4bf", Math.round(v.bearing || 0))}
-              // For per-route colors, pass a route->color map and set fillColor here.
             />
           ))}
         </GoogleMap>
