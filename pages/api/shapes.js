@@ -21,9 +21,12 @@ export default async function handler(req, res) {
       return res.status(200).json(cache.data);
     }
 
-    // Try Sweden-3 static, then Regional static
+    // try Sweden 3 first, then Regional
     let r = await fetch(SWEDEN3_ZIP);
-    if (!r.ok) r = await fetch(REGIONAL_ZIP);
+    if (!r.ok) {
+      if (debug) console.warn("Sweden3 static failed, trying Regional:", r.status);
+      r = await fetch(REGIONAL_ZIP);
+    }
     if (!r.ok) throw new Error(`Static GTFS fetch failed: ${r.status} ${r.statusText}`);
 
     const buf = Buffer.from(await r.arrayBuffer());
@@ -71,7 +74,7 @@ export default async function handler(req, res) {
           short_name: rt.route_short_name || "",
           long_name: rt.route_long_name || "",
           color: hex(rt.route_color),
-          text_color: hex(rt.route_text_color || "#000000"),
+          text_color: hex(rt.route_text_color || "#000000")
         },
         geometry: { type: "MultiLineString", coordinates: lines }
       });
@@ -83,7 +86,7 @@ export default async function handler(req, res) {
         short_name: r.route_short_name || "",
         long_name: r.route_long_name || "",
         color: hex(r.route_color),
-        text_color: hex(r.route_text_color || "#000000"),
+        text_color: hex(r.route_text_color || "#000000")
       })),
       shapes: { type: "FeatureCollection", features }
     };
@@ -94,6 +97,7 @@ export default async function handler(req, res) {
   } catch (err) {
     const msg = `Failed to build shapes: ${err?.message || err}`;
     if (debug) console.error("Shapes API error:", msg);
+    // return empty shapes so the app still loads
     res.status(200).json({ routes: [], shapes: { type: "FeatureCollection", features: [] }, warning: msg });
   }
 }
