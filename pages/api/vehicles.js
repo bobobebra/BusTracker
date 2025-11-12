@@ -2,16 +2,19 @@ import AdmZip from "adm-zip";
 import Papa from "papaparse";
 import * as Rt from "gtfs-rt-bindings"; // transit_realtime
 
+// 🔒 Your Trafiklab key is hardcoded here (server-side only)
+// NOTE: If this repo is public, rotate the key afterwards.
+const TRAFIKLAB_KEY = "c498298c7eb7434ea59c5fc4149bc7f5";
+
 let tripToRoute = null;
 let lastLoad = 0;
 
 // Build a cache: trip_id -> route_id from static GTFS (Sweden 3)
-async function ensureTripToRoute(apiKey, debug = false) {
+async function ensureTripToRoute(debug = false) {
   const TTL = 12 * 60 * 60 * 1000; // 12h
   if (tripToRoute && Date.now() - lastLoad < TTL) return;
 
-  // ✅ GTFS Sweden 3 static (single file for all operators)
-  const staticUrl = `https://opendata.samtrafiken.se/gtfs-sweden/sweden.zip?key=${encodeURIComponent(apiKey)}`;
+  const staticUrl = `https://opendata.samtrafiken.se/gtfs-sweden/sweden.zip?key=${encodeURIComponent(TRAFIKLAB_KEY)}`;
   const r = await fetch(staticUrl, { cache: "no-store" });
   if (!r.ok) {
     const msg = `GTFS static fetch failed: ${r.status} ${r.statusText}`;
@@ -37,14 +40,10 @@ async function ensureTripToRoute(apiKey, debug = false) {
 export default async function handler(req, res) {
   const debug = req.query.debug === "1";
   try {
-    // Allow ?key= for quick testing if envs didn’t come along to the new project
-    const apiKey = req.query.key || process.env.TRAFIKLAB_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY (or pass ?key=... for debug)" });
+    await ensureTripToRoute(debug);
 
-    await ensureTripToRoute(apiKey, debug);
-
-    // ✅ GTFS-RT Sweden per-operator vehicle positions (Din Tur)
-    const feedUrl = `https://opendata.samtrafiken.se/gtfs-rt-sweden/dintur/VehiclePositionsSweden.pb?key=${encodeURIComponent(apiKey)}`;
+    // Din Tur realtime via GTFS-RT Sweden
+    const feedUrl = `https://opendata.samtrafiken.se/gtfs-rt-sweden/dintur/VehiclePositionsSweden.pb?key=${encodeURIComponent(TRAFIKLAB_KEY)}`;
     const rr = await fetch(feedUrl, { cache: "no-store" });
     if (!rr.ok) {
       const text = await rr.text().catch(() => "");
@@ -53,9 +52,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: msg });
     }
 
-    // Explicit Buffer for decoder compatibility
     const bytes = Buffer.from(await rr.arrayBuffer());
-
     let feed;
     try {
       feed = Rt.transit_realtime.FeedMessage.decode(bytes);
