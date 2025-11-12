@@ -1,10 +1,11 @@
-import GtfsRealtimeBindings from "gtfs-realtime-bindings";
 import AdmZip from "adm-zip";
 import Papa from "papaparse";
+import { transit_realtime } from "gtfs-rt-bindings";
 
 let tripToRoute = null;
 let lastLoad = 0;
 
+// Build a cache: trip_id -> route_id from static GTFS (Din Tur)
 async function ensureTripToRoute(apiKey) {
   const TTL = 12 * 60 * 60 * 1000; // 12h
   if (tripToRoute && Date.now() - lastLoad < TTL) return;
@@ -29,23 +30,25 @@ async function ensureTripToRoute(apiKey) {
 export default async function handler(req, res) {
   try {
     const apiKey = process.env.TRAFIKLAB_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "Missing TRAFIKLAB_API_KEY" });
+
     await ensureTripToRoute(apiKey);
 
+    // Din Tur realtime VehiclePositions feed
     const feedUrl = `https://opendata.samtrafiken.se/gtfs-rt/dintur/VehiclePositions.pb?key=${apiKey}`;
-    const rr = await fetch(feedUrl);
-    if (!rr.ok) throw new Error(`Trafiklab request failed: ${rr.status}`);
+    const rr = await fetch(feedUrl, { cache: "no-store" });
+    if (!rr.ok) throw new Error(`Trafiklab VehiclePositions failed: ${rr.status}`);
 
     const buf = new Uint8Array(await rr.arrayBuffer());
-    const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buf);
+    const feed = transit_realtime.FeedMessage.decode(buf);
 
     const vehicles = feed.entity
       .filter((e) => e.vehicle?.position)
       .map((e) => {
         const v = e.vehicle;
         const tripId = v.trip?.tripId ? String(v.trip.tripId) : null;
-        const rtFromRealtime = v.trip?.routeId ? String(v.trip.routeId) : null;
-        const routeResolved =
-          rtFromRealtime || (tripId ? tripToRoute.get(tripId) : null) || "unknown";
+        const rtRoute = v.trip?.routeId ? String(v.trip.routeId) : null;
+        const resolvedRoute = rtRoute || (tripId ? tripToRoute.get(tripId) : null) || "unknown";
 
         return {
           id: e.id,
@@ -53,7 +56,7 @@ export default async function handler(req, res) {
           lon: v.position.longitude,
           bearing: v.position.bearing ?? 0,
           speed: v.position.speed ?? null,
-          route: routeResolved,
+          route: resolvedRoute,
           tripId,
           label: v.vehicle?.label ?? v.vehicle?.id ?? null,
           timestamp: v.timestamp ?? null
@@ -61,9 +64,9 @@ export default async function handler(req, res) {
       });
 
     res.setHeader("Cache-Control", "no-store");
-    return res.status(200).json(vehicles);
+    res.status(200).json(vehicles);
   } catch (err) {
     console.error("Vehicle API error:", err);
-    return res.status(500).json({ error: "Failed to fetch vehicle data" });
+    res.status(500).json({ error: "Failed to fetch vehicle data" });
   }
 }
