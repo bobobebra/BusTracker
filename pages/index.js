@@ -25,7 +25,7 @@ export default function Home() {
       }
     }
     loadVehicles();
-    const id = setInterval(loadVehicles, 10000);
+    const id = setInterval(loadVehicles, 2400);
     return () => { cancel = true; clearInterval(id); };
   }, []);
 
