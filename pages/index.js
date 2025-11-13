@@ -1,136 +1,81 @@
-import { useEffect, useMemo, useState } from "react";
+// pages/index.js
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
-const MapOSM = dynamic(() => import("../components/MapOSM"), { ssr: false });
+const Map = dynamic(() => import("../components/Map"), { ssr: false });
 
-export default function Home() {
+const UPDATE_INTERVAL_MS = 15000;
+
+export default function HomePage() {
   const [vehicles, setVehicles] = useState([]);
-  const [routes, setRoutes] = useState([]);
-  const [shapes, setShapes] = useState(null);
-  const [selectedRouteId, setSelectedRouteId] = useState(null);
   const [selectedBus, setSelectedBus] = useState(null);
-  const [routeQuery, setRouteQuery] = useState("");
+  const [error, setError] = useState(null);
 
-  // vehicles every 10s (keeps below Trafiklab burst limits)
   useEffect(() => {
-    let cancel = false;
     async function loadVehicles() {
       try {
-        console.log("🔄 fetching vehicles…");
-        const res = await fetch("/api/vehicles", { cache: "no-store" });
+        const res = await fetch("/api/vehicles");
+        if (!res.ok) throw new Error(`Bad status: ${res.status}`);
         const data = await res.json();
-        if (!cancel) setVehicles(Array.isArray(data) ? data : []);
-      } catch (e) {
-        console.error("vehicles error", e);
+        setVehicles(data);
+        setError(null);
+      } catch (err) {
+        console.error("Failed to load vehicles", err);
+        setError("Failed to load bus data");
       }
     }
+
     loadVehicles();
-    const id = setInterval(loadVehicles, 10000);
-    return () => { cancel = true; clearInterval(id); };
+    const id = setInterval(loadVehicles, UPDATE_INTERVAL_MS);
+    return () => clearInterval(id);
   }, []);
-
-  // shapes (routes + lines) once
-  useEffect(() => {
-    (async () => {
-      try {
-        console.log("🗺️ fetching shapes…");
-        const r = await fetch("/api/shapes");
-        const j = await r.json();
-        setRoutes(j.routes || []);
-        setShapes(j.shapes || null);
-      } catch (e) {
-        console.error("shapes error", e);
-      }
-    })();
-  }, []);
-
-  const filteredRoutes = useMemo(() => {
-    const q = routeQuery.trim().toLowerCase();
-    if (!q) return routes;
-    return routes.filter((r) =>
-      (r.short_name || "").toLowerCase().includes(q) ||
-      (r.long_name || "").toLowerCase().includes(q) ||
-      (r.route_id || "").toLowerCase().includes(q)
-    );
-  }, [routes, routeQuery]);
-
-  const visibleVehicles = useMemo(
-    () => (selectedRouteId ? vehicles.filter((v) => String(v.route) === String(selectedRouteId)) : vehicles),
-    [vehicles, selectedRouteId]
-  );
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* Sidebar */}
-      <aside style={{ width: 300, background: "#0f1115", color: "#fff", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: 10, borderBottom: "1px solid #222", position: "sticky", top: 0, background: "#0f1115", zIndex: 1 }}>
-          <input
-            placeholder="Search route… e.g. 84"
-            value={routeQuery}
-            onChange={(e) => setRouteQuery(e.target.value)}
-            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #333", background: "#151821", color: "#eee", fontSize: 14 }}
-          />
-        </div>
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        background: "#111",
+        color: "#eee",
+        fontFamily: "system-ui, sans-serif"
+      }}
+    >
+      <div
+        style={{
+          width: "280px",
+          borderRight: "1px solid #333",
+          padding: "8px",
+          overflowY: "auto"
+        }}
+      >
+        <h2 style={{ textAlign: "center", marginTop: 0 }}>🚌 Sundsvall buses</h2>
+        {error && <p style={{ color: "red" }}>{error}</p>}
+        {!error && vehicles.length === 0 && <p>No vehicles found...</p>}
 
-        <div style={{ display: "flex", gap: 0, flex: 1, overflow: "hidden" }}>
-          <div style={{ width: "55%", borderRight: "1px solid #222", overflowY: "auto", padding: 10 }}>
-            <h3 style={{ margin: "6px 0", fontSize: 13, opacity: .8 }}>Routes</h3>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {filteredRoutes.map((r) => (
-                <li
-                  key={r.route_id}
-                  onClick={() => { setSelectedRouteId(r.route_id === selectedRouteId ? null : r.route_id); setSelectedBus(null); }}
-                  style={{
-                    padding: "6px 8px",
-                    marginBottom: 6,
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 2,
-                    border: `1px solid ${r.route_id === selectedRouteId ? "#3a4a7a" : "#222"}`,
-                    background: r.route_id === selectedRouteId ? "#1a1f2e" : "transparent"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: 2, background: r.color || "#888", display: "inline-block" }} />
-                    <strong style={{ fontSize: 14 }}>{r.short_name || r.route_id}</strong>
-                  </div>
-                  {r.long_name && <div style={{ fontSize: 12, opacity: .7 }}>{r.long_name}</div>}
-                </li>
-              ))}
-            </ul>
-          </div>
+        <ul style={{ listStyle: "none", padding: 0 }}>
+          {vehicles.map((bus) => (
+            <li
+              key={bus.id}
+              onClick={() => setSelectedBus(bus)}
+              style={{
+                background:
+                  selectedBus?.id === bus.id ? "#333" : "transparent",
+                padding: "6px",
+                margin: "4px 0",
+                borderRadius: "6px",
+                cursor: "pointer"
+              }}
+            >
+              <strong>Line {bus.route}</strong>
+              <br />
+              <small>ID: {bus.id}</small>
+            </li>
+          ))}
+        </ul>
+      </div>
 
-          <div style={{ width: "45%", overflowY: "auto", padding: 10 }}>
-            <h3 style={{ margin: "6px 0", fontSize: 13, opacity: .8 }}>Buses</h3>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {visibleVehicles.map((bus) => (
-                <li
-                  key={bus.id}
-                  onClick={() => setSelectedBus(bus)}
-                  style={{ padding: "6px 8px", marginBottom: 6, borderRadius: 6, cursor: "pointer", border: "1px solid #222" }}
-                >
-                  <strong style={{ fontSize: 14 }}>Bus {bus.route}</strong>
-                  <div style={{ fontSize: 12, opacity: .75 }}>
-                    ID: {bus.id}{bus.label ? ` • ${bus.label}` : ""}{typeof bus.bearing === "number" ? ` • ${Math.round(bus.bearing)}°` : ""}
-                  </div>
-                </li>
-              ))}
-              {visibleVehicles.length === 0 && <li style={{ fontSize: 12, opacity: .6 }}>No buses for this filter…</li>}
-            </ul>
-          </div>
-        </div>
-      </aside>
-
-      {/* Map */}
       <div style={{ flex: 1 }}>
-        <MapOSM
-          vehicles={visibleVehicles}
-          shapes={shapes}
-          selectedRouteId={selectedRouteId}
-          selectedBus={selectedBus}
-        />
+        <Map vehicles={vehicles} selectedBus={selectedBus} />
       </div>
     </div>
   );
