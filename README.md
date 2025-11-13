@@ -6,7 +6,7 @@ This repository contains a simple Next.js application that displays real‑time 
 
 * **Real‑time vehicle positions** – The back‑end API fetches the `VehiclePositions.pb` feed from Trafiklab and decodes the protobuf data using the `gtfs‑realtime‑bindings` library.
 * **Interactive map** – Positions are plotted on an OpenStreetMap layer using `react‑leaflet`. Clicking on a bus marker reveals its route, speed and bearing.
-* **Auto‑refresh** – Vehicle data is refreshed every 10 seconds so positions remain up‑to‑date.
+* **Auto‑refresh** – Vehicle data is refreshed every 10 seconds so positions remain up‑to‑date
 
 ## Setup
 
