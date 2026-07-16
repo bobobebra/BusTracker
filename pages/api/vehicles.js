@@ -1,144 +1,223 @@
-import * as Rt from "gtfs-rt-bindings";
+import * as GtfsRt from "gtfs-rt-bindings";
 import AdmZip from "adm-zip";
 import Papa from "papaparse";
 
-// ---- CONFIG ----
-const TL_KEY = "5669c38dfd454535a3e6d59c71ccab61";
-const OP = "dintur";
+const TRAFIKLAB_KEY =
+  process.env.TRAFIKLAB_API_KEY || "5669c38dfd454535a3e6d59c71ccab61";
+const OPERATOR = "dintur";
 
 const URLS = {
-  // FIXED: Removed the massive 'sweden.zip' that causes timeouts.
-  // We now rely solely on the regional 'dintur' zip.
-  staticRegional: `https://opendata.samtrafiken.se/gtfs/${OP}/${OP}.zip?key=${TL_KEY}`,
-  vpRegional: `https://opendata.samtrafiken.se/gtfs-rt/${OP}/VehiclePositions.pb?key=${TL_KEY}`
+  staticRegional: `https://opendata.samtrafiken.se/gtfs/${OPERATOR}/${OPERATOR}.zip?key=${TRAFIKLAB_KEY}`,
+  realtimeRegional: `https://opendata.samtrafiken.se/gtfs-rt/${OPERATOR}/VehiclePositions.pb?key=${TRAFIKLAB_KEY}`,
+  realtimeSweden: `https://opendata.samtrafiken.se/gtfs-rt-sweden/${OPERATOR}/VehiclePositionsSweden.pb?key=${TRAFIKLAB_KEY}`
 };
 
-// Sundsvall-only lines
-const SUND_LINES = new Set([
-  "1","2","3","4","5",
-  "70","71","73","74","76","78",
-  "84","85","90",
-  "120","610","611"
+const SUNDSVALL_LINES = new Set([
+  "1", "2", "3", "4", "5",
+  "70", "71", "73", "74", "76", "78",
+  "84", "85", "90", "120", "610", "611"
 ]);
 
-// Cache to avoid hitting the API too often
+// A geographic fallback prevents an outdated route list or missing route mapping
+// from hiding every vehicle on the map.
+const SUNDSVALL_BOUNDS = {
+  minLat: 62.15,
+  maxLat: 62.65,
+  minLon: 16.75,
+  maxLon: 17.95
+};
+
 let cachedVehicles = null;
 let cacheAt = 0;
-const CACHE_MS = 7000;
+const CACHE_MS = 10_000;
 
-// In-memory mappings
 let tripToRoute = null;
 let routeIdToShort = null;
-let lastGTFSLoad = 0;
+let lastGtfsLoad = 0;
 
-// ---- HELPERS ----
-async function fetchBuf(url) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
-  }
-  return Buffer.from(await res.arrayBuffer());
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function buildMaps() {
-  // Reload static data only if it's missing or older than 12 hours
-  if (tripToRoute && routeIdToShort && Date.now() - lastGTFSLoad < 12 * 3600 * 1000) {
+async function fetchBuffer(url, timeoutMs = 10_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `${response.status} ${response.statusText}${body ? `: ${body.slice(0, 160)}` : ""}`
+      );
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchRealtime() {
+  const errors = [];
+
+  for (const url of [URLS.realtimeRegional, URLS.realtimeSweden]) {
+    try {
+      return await fetchBuffer(url);
+    } catch (error) {
+      errors.push(error?.message || String(error));
+    }
+  }
+
+  throw new Error(`All realtime feeds failed: ${errors.join(" | ")}`);
+}
+
+async function buildRouteMaps() {
+  if (
+    tripToRoute &&
+    routeIdToShort &&
+    Date.now() - lastGtfsLoad < 12 * 60 * 60 * 1000
+  ) {
     return;
   }
 
-  console.log("Fetching static GTFS data (Regional)...");
-  
-  // FIXED: Fetch only the regional zip
-  const buf = await fetchBuf(URLS.staticRegional);
-  const zip = new AdmZip(buf);
-
+  const buffer = await fetchBuffer(URLS.staticRegional, 8_000);
+  const zip = new AdmZip(buffer);
   const tripsEntry = zip.getEntry("trips.txt");
   const routesEntry = zip.getEntry("routes.txt");
 
   if (!tripsEntry || !routesEntry) {
-    throw new Error("GTFS static missing files (trips.txt or routes.txt)");
+    throw new Error("Static GTFS is missing trips.txt or routes.txt");
   }
 
-  const tripsTxt = tripsEntry.getData().toString("utf8");
-  const routesTxt = routesEntry.getData().toString("utf8");
+  const trips = Papa.parse(tripsEntry.getData().toString("utf8"), {
+    header: true,
+    skipEmptyLines: true
+  }).data;
+  const routes = Papa.parse(routesEntry.getData().toString("utf8"), {
+    header: true,
+    skipEmptyLines: true
+  }).data;
 
-  const trips = Papa.parse(tripsTxt, { header: true, skipEmptyLines: true }).data;
-  const routes = Papa.parse(routesTxt, { header: true, skipEmptyLines: true }).data;
+  const nextTripToRoute = new Map();
+  const nextRouteIdToShort = new Map();
 
-  const t2r = new Map();
-  const ridToShort = new Map();
-
-  for (const r of routes) {
-    const rid = r.route_id?.trim();
-    const short = r.route_short_name?.trim();
-    if (rid && short) ridToShort.set(rid, short);
+  for (const route of routes) {
+    const routeId = route.route_id?.trim();
+    const shortName = route.route_short_name?.trim();
+    if (routeId && shortName) nextRouteIdToShort.set(routeId, shortName);
   }
 
-  for (const t of trips) {
-    if (t.trip_id && t.route_id) {
-      t2r.set(String(t.trip_id), String(t.route_id));
-    }
+  for (const trip of trips) {
+    const tripId = trip.trip_id?.trim();
+    const routeId = trip.route_id?.trim();
+    if (tripId && routeId) nextTripToRoute.set(tripId, routeId);
   }
 
-  tripToRoute = t2r;
-  routeIdToShort = ridToShort;
-  lastGTFSLoad = Date.now();
-  console.log("Static GTFS data built.");
+  tripToRoute = nextTripToRoute;
+  routeIdToShort = nextRouteIdToShort;
+  lastGtfsLoad = Date.now();
 }
 
-// ---- API HANDLER ----
+function isInSundsvall(lat, lon) {
+  return (
+    lat >= SUNDSVALL_BOUNDS.minLat &&
+    lat <= SUNDSVALL_BOUNDS.maxLat &&
+    lon >= SUNDSVALL_BOUNDS.minLon &&
+    lon <= SUNDSVALL_BOUNDS.maxLon
+  );
+}
+
+function getFeedMessageDecoder() {
+  // gtfs-rt-bindings exports FeedMessage directly. The default fallback keeps
+  // this working through different CommonJS/ESM interop modes in Next.js.
+  return GtfsRt.FeedMessage || GtfsRt.default?.FeedMessage;
+}
+
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "s-maxage=10, stale-while-revalidate=60");
+
+  if (cachedVehicles && Date.now() - cacheAt < CACHE_MS) {
+    return res.status(200).json(cachedVehicles);
+  }
+
   try {
-    // 1. Return cache if fresh
-    if (cachedVehicles && Date.now() - cacheAt < CACHE_MS) {
-      return res.status(200).json(cachedVehicles);
+    // Start loading route names, but do not let a large static ZIP prevent live
+    // positions from appearing. Coordinates are used as a fallback filter.
+    const routeMapsPromise = buildRouteMaps().catch((error) => {
+      console.warn("Static GTFS mapping unavailable:", error?.message || error);
+    });
+
+    const raw = await fetchRealtime();
+    await Promise.race([routeMapsPromise, sleep(1_500)]);
+
+    const FeedMessage = getFeedMessageDecoder();
+    if (!FeedMessage) {
+      throw new Error("gtfs-rt-bindings did not export FeedMessage");
     }
 
-    // 2. Ensure static maps (routes/trips) are loaded
-    await buildMaps();
-
-    // 3. Fetch Realtime Data
-    const raw = await fetchBuf(URLS.vpRegional);
-    const feed = Rt.GtfsRealtimeBindings.FeedMessage.decode(raw);
-
+    const feed = FeedMessage.decode(raw);
     const vehicles = [];
 
-    for (const ent of feed.entity || []) {
-      if (!ent.vehicle?.position) continue;
+    for (const entity of feed.entity || []) {
+      const vehiclePosition = entity.vehicle;
+      const position = vehiclePosition?.position;
+      if (!position) continue;
 
-      const v = ent.vehicle;
-      const trip = v.trip?.tripId ? String(v.trip.tripId) : null;
-      const rtRoute = v.trip?.routeId ? String(v.trip.routeId) : null;
+      const lat = Number(position.latitude);
+      const lon = Number(position.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
 
-      let rid = rtRoute;
-      // If routeId is missing in realtime feed, look it up via tripId
-      if (!rid && trip && tripToRoute.has(trip)) {
-        rid = tripToRoute.get(trip);
-      }
+      const trip = vehiclePosition.trip;
+      // gtfs-rt-bindings preserves protobuf snake_case names. Camel-case
+      // fallbacks support feeds/versions that expose transformed objects.
+      const tripId = String(trip?.trip_id ?? trip?.tripId ?? "").trim() || null;
+      const realtimeRouteId =
+        String(trip?.route_id ?? trip?.routeId ?? "").trim() || null;
+      const routeId =
+        realtimeRouteId || (tripId ? tripToRoute?.get(tripId) : null) || null;
+      const shortName =
+        (routeId ? routeIdToShort?.get(String(routeId)) : null) || routeId || null;
 
-      const short = routeIdToShort.get(rid) || rid;
+      const route = shortName ? String(shortName).trim() : "?";
+      const knownSundsvallLine = SUNDSVALL_LINES.has(route);
 
-      // Filter: Only return buses in the Sundsvall list
-      if (!short || !SUND_LINES.has(short)) continue;
+      if (!knownSundsvallLine && !isInSundsvall(lat, lon)) continue;
 
+      const vehicleInfo = vehiclePosition.vehicle;
       vehicles.push({
-        id: ent.id,
-        route: short,
-        routeId: rid,
-        lat: v.position.latitude,
-        lon: v.position.longitude,
-        bearing: v.position.bearing ?? 0,
-        speed: v.position.speed ?? null,
-        timestamp: v.timestamp ?? null
+        id:
+          entity.id ||
+          vehicleInfo?.id ||
+          `${route}-${lat.toFixed(5)}-${lon.toFixed(5)}`,
+        route,
+        routeId,
+        tripId,
+        label: vehicleInfo?.label ?? vehicleInfo?.id ?? null,
+        lat,
+        lon,
+        bearing: Number(position.bearing ?? 0),
+        speed: position.speed == null ? null : Number(position.speed),
+        timestamp: vehiclePosition.timestamp ?? null
       });
     }
 
     cachedVehicles = vehicles;
     cacheAt = Date.now();
+    return res.status(200).json(vehicles);
+  } catch (error) {
+    console.error("Vehicle API error:", error);
 
-    res.status(200).json(vehicles);
-  } catch (err) {
-    console.error("API Error:", err);
-    return res.status(500).json({ error: err.message || String(err) });
+    if (cachedVehicles) {
+      return res.status(200).json(cachedVehicles);
+    }
+
+    return res.status(500).json({
+      error: error?.message || String(error)
+    });
   }
 }
