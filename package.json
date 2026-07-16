@@ -1,13 +1,24 @@
-"dependencies": {
-    "leaflet": "^1.9.4",
-    "next": "14.2.23",  // Keep whatever version your tool set here!
-    "pako": "^2.1.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-leaflet": "^4.2.1",
-    
-    // ADD THESE 3 LINES:
+{
+  "name": "sundsvall-bus-tracker",
+  "version": "1.6.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
     "adm-zip": "^0.5.10",
-    "gtfs-rt-bindings": "^4.0.0",
-    "papaparse": "^5.4.1"
+    "gtfs-rt-bindings": "^4.10.0",
+    "leaflet": "^1.9.4",
+    "next": "^16.2.6",
+    "pako": "^2.1.0",
+    "papaparse": "^5.4.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-leaflet": "4.2.1"
   }
+}
